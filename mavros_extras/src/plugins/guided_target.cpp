@@ -147,6 +147,7 @@ private:
     /* check origin has been set */
     if (!is_map_init) {
       RCLCPP_WARN(lg, "PositionTargetGlobal failed because no origin");
+      return;
     }
 
     /* convert lat/lon target to ECEF */
