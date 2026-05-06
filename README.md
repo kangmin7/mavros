@@ -1,6 +1,6 @@
-# MAVROS for m-explore-ros2
+# MAVROS for m-explore-ros2-px4
 
-Custom [MAVROS](https://github.com/mavlink/mavros) for integration with [m-explore-ros2](https://github.com/robo-friends/m-explore-ros2), targeting ROS 2 Humble
+Custom [MAVROS](https://github.com/mavlink/mavros) for integration with [m-explore-ros2-px4](https://github.com/kangmin7/m-explore-ros2-px4), targeting ROS 2 Humble
 
 ---
 
