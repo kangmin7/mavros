@@ -22,6 +22,7 @@
 
 #include <array>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <string>
 #include <shared_mutex>     // NOLINT
@@ -94,11 +95,12 @@ public:
 
   std::shared_ptr<Router> parent;
 
-  uint32_t id;                         // id of the endpoint
-  Type link_type;                      // class of the endpoint
-  std::string url;                     // url to open that endpoint
-  std::set<addr_t> remote_addrs;       // remotes that we heard there
-  std::set<addr_t> stale_addrs;        // temporary storage for stale remote addrs
+  uint32_t id;                           // id of the endpoint
+  Type link_type;                        // class of the endpoint
+  std::string url;                       // url to open that endpoint
+  std::shared_mutex remote_addrs_mutex;  // guards remote_addrs and stale_addrs
+  std::set<addr_t> remote_addrs;         // remotes that we heard there
+  std::set<addr_t> stale_addrs;          // temporary storage for stale remote addrs
 
   virtual bool is_open() = 0;
   virtual std::pair<bool, std::string> open() = 0;
@@ -127,7 +129,7 @@ public:
  * 2. FCU targeted system/component -> GCS/UAS endpoint that have matching address
  * 3. FCU targeted system -> same as for p.2
  * 4. GCS broadcast -> FCU, UAS
- * 5. GCS targeted -> FCU/UAS maching addr
+ * 5. GCS targeted -> FCU/UAS matching addr
  * 6. UAS broadcast -> FCU, GCS
  * 7. UAS targeted -> FCU/GCS
  */
@@ -289,7 +291,7 @@ public:
  * ROSEndpoint implements Endpoint for UAS node
  *
  * That endpoint converts mavlink messages to ROS2 IDL
- * and passes them trough DDL messaging or intra-process comms.
+ * and passes them through DDL messaging or intra-process comms.
  *
  * Each drone would have separate UAS node
  */

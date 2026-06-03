@@ -33,7 +33,7 @@ using namespace std::placeholders;      // NOLINT
 using namespace std::chrono_literals;   // NOLINT
 
 /**
- * Time syncronization status publisher
+ * Time synchronization status publisher
  *
  * Based on diagnostic_updater::FrequencyStatus
  */
@@ -247,7 +247,7 @@ public:
     // Filter gain scheduling
     //
     // The filter interpolates between the initial and final gains while the number of
-    // exhanged timesync packets is less than convergence_window. A lower value will
+    // exchanged timesync packets is less than convergence_window. A lower value will
     // allow the timesync to converge faster, but with potentially less accurate initial
     // offset and skew estimates.
     node_declare_and_watch_parameter(
@@ -343,7 +343,7 @@ private:
     const bool fcu_time_valid = mtime.time_unix_usec > 1234567890ULL * 1000000;
 
     if (fcu_time_valid) {
-      // continious publish for ntpd
+      // continuous publish for ntpd
       auto time_unix = sensor_msgs::msg::TimeReference();
       rclcpp::Time time_ref(
         mtime.time_unix_usec / 1000000,                 // t_sec
