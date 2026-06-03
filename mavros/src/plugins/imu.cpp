@@ -187,7 +187,7 @@ private:
 
   /**
    * @brief Fill and publish IMU data message.
-   * @param time_boot_ms     Message timestamp (not syncronized)
+   * @param time_boot_ms     Message timestamp (not synchronized)
    * @param orientation_enu  Orientation in the base_link ENU frame
    * @param orientation_ned  Orientation in the aircraft NED frame
    * @param gyro_flu         Angular velocity/rate in the base_link Forward-Left-Up frame
@@ -228,7 +228,7 @@ private:
 
     if (!received_linear_accel) {
       // Set element 0 of covariance matrix to -1
-      // if no data received as per sensor_msgs/Imu defintion
+      // if no data received as per sensor_msgs/Imu definition
       imu_enu_msg.linear_acceleration_covariance[0] = -1;
       imu_ned_msg.linear_acceleration_covariance[0] = -1;
     }
@@ -464,7 +464,7 @@ private:
       auto static_pressure_msg = sensor_msgs::msg::FluidPressure();
 
       static_pressure_msg.header = header;
-      static_pressure_msg.fluid_pressure = imu_hr.abs_pressure;
+      static_pressure_msg.fluid_pressure = imu_hr.abs_pressure * MILLIBAR_TO_PASCAL;
 
       static_press_pub->publish(static_pressure_msg);
     }
@@ -478,7 +478,7 @@ private:
       auto differential_pressure_msg = sensor_msgs::msg::FluidPressure();
 
       differential_pressure_msg.header = header;
-      differential_pressure_msg.fluid_pressure = imu_hr.diff_pressure;
+      differential_pressure_msg.fluid_pressure = imu_hr.diff_pressure * MILLIBAR_TO_PASCAL;
 
       diff_press_pub->publish(differential_pressure_msg);
     }
@@ -621,12 +621,12 @@ private:
 
     auto static_pressure_msg = sensor_msgs::msg::FluidPressure();
     static_pressure_msg.header = header;
-    static_pressure_msg.fluid_pressure = press.press_abs * 100.0;
+    static_pressure_msg.fluid_pressure = press.press_abs * MILLIBAR_TO_PASCAL;
     static_press_pub->publish(static_pressure_msg);
 
     auto differential_pressure_msg = sensor_msgs::msg::FluidPressure();
     differential_pressure_msg.header = header;
-    differential_pressure_msg.fluid_pressure = press.press_diff * 100.0;
+    differential_pressure_msg.fluid_pressure = press.press_diff * MILLIBAR_TO_PASCAL;
     diff_press_pub->publish(differential_pressure_msg);
   }
 
