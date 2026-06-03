@@ -117,7 +117,9 @@ UAS::UAS(
           }),
         [this](std::thread * t) {
           this->exec.cancel();
-          t->join();
+          if (t->joinable()) {
+            t->join();
+          }
           delete t;
         });
 
@@ -177,6 +179,12 @@ UAS::UAS(
         source_system, source_component,
         target_system, target_component);
     });
+}
+
+UAS::~UAS()
+{
+  // Stop the executor before plugin nodes and subscriptions begin tearing down.
+  exec_spin_thd.reset();
 }
 
 void UAS::plugin_route(const mavlink_message_t * mmsg, const Framing framing)
