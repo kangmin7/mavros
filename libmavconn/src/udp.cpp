@@ -73,11 +73,10 @@ static bool resolve_address_udp(
 MAVConnUDP::MAVConnUDP(
   uint8_t system_id, uint8_t component_id,
   std::string bind_host, uint16_t bind_port,
-  std::string remote_host, uint16_t remote_port)
+  std::string remote_host, uint16_t remote_port, asio::io_service * shared_io)
 : MAVConnInterface(system_id, component_id),
-  io_service(),
-  io_work(new io_service::work(io_service)),
-  is_running(false),
+  io_runner(shared_io),
+  io_service(io_runner.io()),
   permanent_broadcast(false),
   remote_exists(false),
   socket(io_service),
@@ -134,7 +133,7 @@ MAVConnUDP::~MAVConnUDP()
   close();
 
   // If the socket already closed and the io_service running
-  if (is_running) {
+  if (io_runner.owns_thread() && io_runner.is_running()) {
     stop();
   }
 }
@@ -147,38 +146,35 @@ void MAVConnUDP::connect(
   port_closed_cb = cb_handle_closed_port;
 
   // give some work to io_service before start
-  io_service.post(std::bind(&MAVConnUDP::do_recvfrom, this));
+  io_service.post([this]() {this->do_recvfrom();});
 
-  // run io_service for async io
-  io_thread = std::thread(
-    [this]() {
-      is_running = true;
-      utils::set_this_thread_name("mudp%zu", conn_id);
-      try {
-        io_service.run();
-      } catch (std::exception & ex) {
-        CONSOLE_BRIDGE_logError(PFXd "io_service execption: %s", conn_id, ex.what());
-      }
-      is_running = false;
-    });
+  if (io_runner.owns_thread()) {
+    // run io_service for async io
+    io_runner.start(
+      [this]() {
+        utils::set_this_thread_name("mudp%zu", conn_id);
+        try {
+          io_service.run();
+        } catch (std::exception & ex) {
+          CONSOLE_BRIDGE_logError(PFXd "io_service exception: %s", conn_id, ex.what());
+        }
+      });
+  }
 }
 
 void MAVConnUDP::stop()
 {
-  io_work.reset();
-  io_service.stop();
-
-  if (io_thread.joinable()) {
-    io_thread.join();
+  if (!io_runner.owns_thread()) {
+    return;
   }
 
-  io_service.reset();
+  io_runner.shutdown_owned();
 }
 
 void MAVConnUDP::close()
 {
   {
-    lock_guard lock(mutex);
+    std::lock_guard<std::mutex> lock(mutex);
     if (!is_open()) {
       return;
     }
@@ -187,8 +183,8 @@ void MAVConnUDP::close()
     socket.close();
   }
 
-  // Stop io_service if the thread is not the io_thread (else exception "resource deadlock avoided")
-  if (std::this_thread::get_id() != io_thread.get_id()) {
+  // For owned contexts this is safe from callbacks: shutdown avoids self-join.
+  if (io_runner.owns_thread()) {
     stop();
   }
 
@@ -210,7 +206,7 @@ void MAVConnUDP::send_bytes(const uint8_t * bytes, size_t length)
   }
 
   {
-    lock_guard lock(mutex);
+    std::lock_guard<std::mutex> lock(mutex);
 
     if (tx_q.size() >= MAX_TXQ_SIZE) {
       throw std::length_error("MAVConnUDP::send_bytes: TX queue overflow");
@@ -218,7 +214,8 @@ void MAVConnUDP::send_bytes(const uint8_t * bytes, size_t length)
 
     tx_q.emplace_back(bytes, length);
   }
-  io_service.post(std::bind(&MAVConnUDP::do_sendto, shared_from_this(), true));
+  auto sthis = shared_from_this();
+  io_service.post([sthis]() {sthis->do_sendto(true);});
 }
 
 void MAVConnUDP::send_message(const mavlink_message_t * message)
@@ -238,7 +235,7 @@ void MAVConnUDP::send_message(const mavlink_message_t * message)
   log_send(PFX, message);
 
   {
-    lock_guard lock(mutex);
+    std::lock_guard<std::mutex> lock(mutex);
 
     if (tx_q.size() >= MAX_TXQ_SIZE) {
       throw std::length_error("MAVConnUDP::send_message: TX queue overflow");
@@ -246,7 +243,8 @@ void MAVConnUDP::send_message(const mavlink_message_t * message)
 
     tx_q.emplace_back(message);
   }
-  io_service.post(std::bind(&MAVConnUDP::do_sendto, shared_from_this(), true));
+  auto sthis = shared_from_this();
+  io_service.post([sthis]() {sthis->do_sendto(true);});
 }
 
 void MAVConnUDP::send_message(const mavlink::Message & message, const uint8_t source_compid)
@@ -264,7 +262,7 @@ void MAVConnUDP::send_message(const mavlink::Message & message, const uint8_t so
   log_send_obj(PFX, message);
 
   {
-    lock_guard lock(mutex);
+    std::lock_guard<std::mutex> lock(mutex);
 
     if (tx_q.size() >= MAX_TXQ_SIZE) {
       throw std::length_error("MAVConnUDP::send_message: TX queue overflow");
@@ -272,7 +270,8 @@ void MAVConnUDP::send_message(const mavlink::Message & message, const uint8_t so
 
     tx_q.emplace_back(message, get_status_p(), sys_id, source_compid);
   }
-  io_service.post(std::bind(&MAVConnUDP::do_sendto, shared_from_this(), true));
+  auto sthis = shared_from_this();
+  io_service.post([sthis]() {sthis->do_sendto(true);});
 }
 
 void MAVConnUDP::do_recvfrom()
@@ -307,7 +306,7 @@ void MAVConnUDP::do_sendto(bool check_tx_state)
     return;
   }
 
-  lock_guard lock(mutex);
+  std::lock_guard<std::mutex> lock(mutex);
   if (tx_q.empty()) {
     return;
   }
@@ -333,22 +332,29 @@ void MAVConnUDP::do_sendto(bool check_tx_state)
       }
 
       sthis->iostat_tx_add(bytes_transferred);
-      lock_guard lock(sthis->mutex);
+      bool continue_send = false;
+      {
+        std::lock_guard<std::mutex> lock(sthis->mutex);
 
-      if (sthis->tx_q.empty()) {
-        sthis->tx_in_progress = false;
-        return;
+        if (sthis->tx_q.empty()) {
+          sthis->tx_in_progress = false;
+          return;
+        }
+
+        buf_ref.pos += bytes_transferred;
+        if (buf_ref.nbytes() == 0) {
+          sthis->tx_q.pop_front();
+        }
+
+        if (!sthis->tx_q.empty()) {
+          continue_send = true;
+        } else {
+          sthis->tx_in_progress = false;
+        }
       }
 
-      buf_ref.pos += bytes_transferred;
-      if (buf_ref.nbytes() == 0) {
-        sthis->tx_q.pop_front();
-      }
-
-      if (!sthis->tx_q.empty()) {
-        sthis->do_sendto(false);
-      } else {
-        sthis->tx_in_progress = false;
+      if (continue_send) {
+        sthis->io_service.post([sthis]() {sthis->do_sendto(false);});
       }
     });
 }
